@@ -1,0 +1,36 @@
+# Supplemental Figure 2
+
+```{r, sampling_depth_setup}
+fig_data <- expand_grid(
+  LibSize=c(1e3, 1e4),
+  CV=c(1.5, 2, 2.5),
+  Percentile=ppoints(100)
+) %>%
+  mutate(
+    BetaA = (LibSize-1)/LibSize/CV^2 - 1/LibSize,
+    BetaB = (LibSize-1)*BetaA,
+    Freq = qbeta(Percentile, shape1=BetaA, shape2=BetaB)
+  )
+
+fig <- fig_data %>%
+  mutate(
+    LibSize = as.factor(LibSize),
+    CV = as.factor(CV)
+  ) %>%
+  ggplot(aes(x=Freq, y=Percentile, group=interaction(LibSize, CV), color=CV, linetype=LibSize)) +
+    geom_line(lwd=1.5) +
+    labs(x = 'Edit Frequency', y = 'CDF', color='Edit CV', linetype='Library Size') +
+    my_theme +
+    scale_color_discrete() +
+    scale_x_continuous(trans="log10")
+```
+
+```{r, sampling_depth, fig.width=6, fig.height=6}
+fig
+```
+Cumulative distribution function for edit frequency at a variety of library sizes and CV, assuming
+a beta distribution for edit frequency.  Detection of a large fraction of the edits requires very deep
+sampling.  For example, in an edit library of size 1000 and with CV of 2, detection of 90%
+of the edits would require enough sampling to be able to detect edits at a frequency of 2.6e-7,
+and the sampling depth would need to be larger than 1e8, even before factoring in the fraction
+of cells that are edited.

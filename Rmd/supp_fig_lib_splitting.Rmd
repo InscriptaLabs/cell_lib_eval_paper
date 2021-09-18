@@ -1,0 +1,109 @@
+# Supplemental Figure 1
+
+```{r, lib_splitting_setup, echo=FALSE, message=FALSE, warning=FALSE}
+df_design <- read.csv("../Data/GE00000599-AMD_A01/BarcodeAmpliconDesignReport.csv") %>%
+  select(SampleName, DesignLibraryId, DesignId, DesignFractionalAbundance)
+sample_name <- df_design$SampleName[1]
+design_lib_id <- df_design$DesignLibraryId[1]
+probs <- df_design %>% pull(DesignFractionalAbundance)
+
+fig_hist <- data.frame(Prob=probs[probs>0]) %>%
+  ggplot(aes(x=Prob)) +
+    scale_x_continuous(trans='log10') +
+    labs(x='Log10(Frequency)', y='Count') +
+    geom_histogram(binwidth=0.1) +
+    geom_vline(xintercept=1/length(probs), col='blue', lwd=1) +
+    my_theme +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+n_test <- round(seq(100,10000,length=100))
+min_obs <- 1
+edit_efficiency <- 0.3
+data_opt <- richness_data_frame(rep(1/length(probs),length(probs)), n_test, edit_efficiency, min_obs) %>% add_column('Library'='Opt')
+data_obs <- richness_data_frame(probs, n_test, edit_efficiency, min_obs) %>% add_column('Library'='Combo')
+
+# Generate split libraries based on predictions with different levels of correlation
+generate_correlated_data <- function(y, rho) {
+  # Given data y, generates random data whose correlation to y is rho
+  x <- rnorm(length(y))
+  y.perp <- residuals(lm(x ~ y))
+  rho * sd(y.perp) * y + y.perp * sd(y) * sqrt(1 - rho^2)
+}
+logit <- function(p) {log(p/(1-p))}
+data_pred <- data.frame()
+pred_scatter_plot <- list()
+set.seed(0)
+for(prediction_correlation in sqrt(c(0.8, 1))) {
+  logit_prob_pred <- generate_correlated_data(logit(probs), prediction_correlation)
+  # Split predictions into two with a Gaussian mixture model
+  gmm <- mclust::Mclust(logit_prob_pred, G=2)
+  group_label <- predict(gmm)$classification
+  group_num   <- table(group_label)
+  group_frac  <- group_num/sum(group_num)
+  p <- data.frame('Observed'=logit(probs), 'Predicted'=logit_prob_pred, 'Group'=as.factor(group_label)) %>%
+    ggplot(aes(x=Observed, y=Predicted, color=Group)) +
+      geom_point(alpha=0.5, size=0.75) +
+      labs(x = 'Observed Frequency (Logit)', y = 'Predicted Frequency (Logit)') +
+      my_theme +
+      scale_color_discrete() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+      theme(legend.position = "none")
+  pred_scatter_plot <- c(pred_scatter_plot, list(p))
+
+  split_name <- sprintf('S-%1.1f', prediction_correlation^2)
+  probs_1 <- probs[group_label==1]
+  probs_1 <- probs_1/sum(probs_1)
+  data_split_1 <- richness_data_frame(probs_1, round(n_test*group_frac[1]), edit_efficiency, min_obs) %>%
+    add_column('Library'=split_name)
+  base_test <- max(data_split_1$Tests)
+  base_mean <- max(data_split_1$Mean)
+  base_sd <- max(data_split_1$Upper)-max(data_split_1$Mean)
+  probs_2 <- probs[group_label==2]
+  probs_2 <- probs_2/sum(probs_2)
+  data_split_2 <- richness_data_frame(probs_2, round(n_test*group_frac[2]), edit_efficiency, min_obs) %>%
+  mutate(
+    Tests = Tests + base_test,
+    Lower = Mean + base_mean - sqrt((Mean-Lower)^2 + base_sd^2),
+    Upper = Mean + base_mean + sqrt((Upper-Mean)^2 + base_sd^2),
+    Mean  = Mean + base_mean
+  ) %>%
+  add_column('Library'=split_name)
+  data_pred <- bind_rows(data_split_1, data_split_2) %>%
+    bind_rows(data_pred)
+}
+fig_scatter <- pred_scatter_plot[[1]]
+
+fig_screen <- bind_rows(data_obs, data_opt, data_pred) %>%
+  mutate(Library = as.factor(Library)) %>%
+  ggplot(aes(x=Tests, y=Mean, ymin=Lower, ymax=Upper, color=Library, fill=Library, group=Library)) +
+    geom_ribbon(alpha=0.5,lwd=0.1) +
+    geom_line(lwd=1.5) +
+    labs(x = 'Isolates', y = 'Richness') +
+    my_theme +
+    scale_color_discrete() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    theme(legend.title = element_blank())
+```
+
+```{r, lib_splitting, fig.width=12, fig.height=4}
+ggarrange(
+  fig_hist,
+  fig_scatter,
+  fig_screen,
+  labels=c('A','B','C'),
+  label.x=c(0.2,0.2,0.1),
+  nrow=1
+)
+```
+Example of the benefit of splitting a library.
+**A:** Histogram of design frequencies for a library targeting `r length(probs)`.  The design frequencies follow a sub-optimal bi-modal distribution where 15% of the designs have a frequency roughly 30 times larger than the remaining 85%.
+**B:** Comparison between empirically-determined design frequencies and predictions from a model using design sequence properties as input.  The R2 of the predictive model is 0.8 and the color of the points indicates a partition of the designs into two classes by clustering with a Gaussian mixture model fit on the predictions.
+**C:** Richness in a screen of 10,000 isolates, assuming an edit efficiency of `r sprintf("%d%%",round(100*edit_efficiency))` for all designs.  The red 'Combo' curve shows the expected richness when screening with all designs combined into a single library.  The green 'Opt' curve is the theoretical optimum for a perfectly even library.  The blue 'S-0.8' curve shows predicted richness when splitting the designs into two libraries using a Gaussian mixture model fitted to the predicted frequencies, as indicated in panel **B**.  The number of isolates screened from each library is proportional to the library size, the discontinuity in the richness curve is the point of transition from screening one library to the other.  The magenta 'S-1.0' curve is as in the previous curve but splitting into two libraries based on predictions that are perfectly correlated with the empirical frequencies.
+
+Results based on sample `r sample_name` from design library `r design_lib_id`
+
+```{r, lib_splitting_extra}
+fig_hist
+fig_scatter
+fig_screen
+```

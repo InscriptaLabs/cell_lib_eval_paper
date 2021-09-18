@@ -1,0 +1,44 @@
+---
+title: 'A framework for evaluating edited cell libraries created by massively parallel genome engineering'
+subtitle: 'Figures for main section'
+output: 
+  html_document:
+    toc: yes 
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggpubr)
+library(patchwork)
+library(viridis)
+library(paletteer)
+library(scales)
+library(ggbeeswarm)
+library(knitr)
+source('../R/richness.R')
+
+my_theme <- theme_pubr(base_size = 11) + theme(plot.title = element_text(hjust = 0.5))
+```
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(
+  fig.width=5,
+  fig.height=5,
+  fig.align='center',
+  fig.path='../png/',
+  echo=FALSE,
+  error=FALSE,
+  results=FALSE,
+  warning=FALSE,
+  message=FALSE
+)
+```
+
+```{r child = 'main_fig_lib_interpretation.Rmd'}
+```
+
+```{r child = 'main_fig_lib_comparison.Rmd'}
+```
+
+```{r child = 'main_fig_richness_scenarios.Rmd'}
+```

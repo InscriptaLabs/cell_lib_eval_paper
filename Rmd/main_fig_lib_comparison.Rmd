@@ -1,0 +1,144 @@
+# Figure 4
+
+```{r, lib_comparison_setup}
+libs <- c("PPV322", "PPV538")
+sample_names <- c("Run X", "Run Y")
+names(sample_names) <- libs
+dummy_list <- as.list(1:2)
+names(dummy_list) <- libs
+sample_pwgs <- dummy_list
+design_pwgs <- dummy_list
+sample_barc <- dummy_list
+design_barc <- dummy_list
+for(lib in libs) {
+  sample_pwgs[[lib]] <- read.csv(sprintf("../Data/%s/PooledWGSSampleReport.csv", lib), stringsAsFactors=FALSE)
+  design_pwgs[[lib]] <- read.csv(sprintf("../Data/%s/PooledWGSDesignReport.csv", lib), stringsAsFactors=FALSE) %>%
+    filter(DesignCategory == "edit") %>%
+    mutate(
+      OnyxEditReadCount = as.numeric(OnyxEditReadCount),
+      TotalSpanningReadCount = as.numeric(TotalSpanningReadCount),
+      FracOnyxEditReadCount = as.numeric(FracOnyxEditReadCount)
+    ) %>%
+    arrange(DesignId)
+  sample_barc[[lib]] <- read.csv(sprintf("../Data/%s/BarcodeAmpliconSampleReport.csv", lib), stringsAsFactors=FALSE)
+  design_barc[[lib]] <- read.csv(sprintf("../Data/%s/BarcodeAmpliconDesignReport.csv", lib), stringsAsFactors=FALSE) %>%
+    filter(DesignCategory == "edit") %>%
+    mutate(DesignFractionalAbundance=DesignFractionalAbundance/sum(DesignFractionalAbundance)) %>%
+    arrange(DesignId)
+}
+S <- nrow(design_pwgs[[1]])
+
+edit_repr_range <- 10^c(-1,2)
+edit_fraction <- dummy_list
+edit_results <- dummy_list
+edit_beta_param <- dummy_list
+edit_fig_lib_comparison <- dummy_list
+design_repr_range <- 10^c(-2,1)
+design_results <- dummy_list
+design_beta_param <- dummy_list
+design_fig_lib_comparison <- dummy_list
+for(lib in libs) {
+  # Designs
+  design_results[[lib]] <- repr_hist_and_qq_plot(
+    design_barc[[lib]]$DesignCount,
+    sum(design_barc[[lib]]$DesignCount),
+    repr_range=design_repr_range,
+    var_type="Design"
+  )
+  design_beta_param[[lib]] <- get_beta_param(S, design_results[[lib]]$cv_bbinom_est)
+  design_fig_lib_comparison[[lib]] <- design_results[[lib]]$fig_repr_hist +
+    my_theme +
+    labs(y="Reagent Count") +
+    ggtitle(paste(sample_names[[lib]], ", Reagents", sep=""))
+  # Edits
+  edit_fraction[[lib]] <- sum(design_pwgs[[lib]]$FracOnyxEditReadCount)
+  edit_results[[lib]] <- repr_hist_and_qq_plot(
+    design_pwgs[[lib]]$OnyxEditReadCount,
+    round(edit_fraction[[lib]] * design_pwgs[[lib]]$TotalSpanningReadCount),
+    repr_range=edit_repr_range,
+    var_type="Edit"
+  )
+  edit_beta_param[[lib]] <- get_beta_param(S, edit_results[[lib]]$cv_bbinom_est)
+  edit_fig_lib_comparison[[lib]] <- edit_results[[lib]]$fig_repr_hist +
+    my_theme +
+    ggtitle(paste(sample_names[[lib]], ", Edits", sep=""))
+}
+
+m_screener <- S
+m <- sort(c(m_screener, seq(100, 50000, length=200), 10^seq(1, 6, length=200)))
+richness_data <- tibble(expand.grid(Cells=m, Sample=sample_names)) %>%
+  inner_join(tibble(
+    Sample=sample_names,
+    EditFraction=unlist(edit_fraction),
+    EditCV=unlist(lapply(edit_results, function(z){z$cv_bbinom_est}))
+  ), by="Sample") %>%
+  mutate(FractionalRichness=fractional_richness_beta(Cells*EditFraction/S, EditCV, lib_size=S, outer=FALSE)$Mean)
+p <- richness_data %>%
+  ggplot(aes(x=Cells, y=FractionalRichness, color=Sample, lty=Sample, group=Sample)) +
+    my_theme +
+    geom_line(lwd=1.5) +
+    theme(legend.title = element_blank(), legend.direction = "vertical") +
+    labs(x="Sample Size", y="Edit Fractional Richness") +
+    scale_color_paletteer_d("ggsci::nrc_npg")
+
+# Screener's curve
+fig_screener <- p +
+  my_theme +
+  geom_point(
+    data=richness_data %>% filter(is.element(Cells, m_screener)),
+    aes(x=Cells, y=FractionalRichness),
+    size=3
+  ) +
+  coord_cartesian(xlim=c(NA, 40000), ylim=c(0, 0.45)) +
+  theme(legend.position="right") +
+  ggtitle("Screener's Curves")
+# Selector's curve
+fig_selector <- p +
+  my_theme +
+  scale_x_continuous(trans="log10") +
+  geom_point(
+    data=richness_data %>% filter(is.element(Cells, 1e6)),
+    aes(x=Cells, y=FractionalRichness),
+    size=3
+  ) +
+  coord_cartesian(xlim=c(1e3, NA)) +
+  theme(legend.position="right") +
+  ggtitle("Selector's Curves")
+```
+
+```{r, lib_comparison, fig.width=12, fig.height=7}
+(design_fig_lib_comparison[[1]] + edit_fig_lib_comparison[[1]] + fig_screener) /
+  (design_fig_lib_comparison[[2]] + edit_fig_lib_comparison[[2]] + fig_selector) +
+  plot_annotation(tag_levels = list(c('A','C','E','B','D','F')))
+```
+
+Comparative evaluation of two runs of a 10,000 member E. coli library, the runs are named X and Y.  A and B: histogram
+and CDF (blue) of design frequencies as determined by deep amplicon sequencing of the reagents.  The red curves
+correspond to beta distributions fit by Maximum Likelihood Estimation (MLE).  The estimates for design CV are
+`r round(design_results[[1]]$cv_bbinom_est, 2)` and `r round(design_results[[2]]$cv_bbinom_est, 2)` for runs X and Y respectively.
+C and D: histogram and CDF (blue) of genomic edit frequences as determined by pWGS.  The red curves are beta distributions
+fit by MLE, the shaded area spans the 95% confidence interval for the edit CV estimates.  The estimated edit CVs are 
+`r round(edit_results[[1]]$cv_bbinom_est, 2)` and `r round(edit_results[[2]]$cv_bbinom_est, 2)` for runs X and Y respectively.
+The pWGS assay is a shallow sampling of edits, with an estimated sampling depth of `r edit_results[[1]]$sampling_depth`
+and  `r edit_results[[2]]$sampling_depth` in runs X and Y respectively, which is very small compared to the library
+size of 10,000.
+The pWGS assay also enables estimation of edit fraction, the estimates are `r round(edit_fraction[[1]], 2)` and
+`r round(edit_fraction[[2]], 2)` for runs X and Y.  Run X has a lower edit fraction but also a lower edit CV compared to
+run Y, so determination of which run is better to use in downstream applications will depend on the situation.
+E: Screener's curves plotting predicted fractional richness against sample size for the two runs.  The points on the curves
+correspond to the Screener's scores using the estimated edit fractions.  For a screen of 20,000 or fewer isolates (twice the
+library size), run Y is predicted to yield greater fractional richness, with its larger edit fraction making up for its larger
+edit CV
+F: Selector's curves, like E but with the x-axis expanded to span a range more typical for a selection application.  
+The points on the curves annotate the Selector's Score, the predicted fractional richness when sampling 1e6 cells.
+The lower edit CV of run X makes it a better choice for a selection application, despite it having less than half the
+edit fraction of run Y.
+
+```{r, lib_comparison_extra}
+design_fig_lib_comparison[[1]]
+edit_fig_lib_comparison[[1]]
+fig_screener
+design_fig_lib_comparison[[2]]
+edit_fig_lib_comparison[[2]]
+fig_selector
+```

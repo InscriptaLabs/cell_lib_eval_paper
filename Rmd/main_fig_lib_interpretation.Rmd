@@ -1,0 +1,184 @@
+# Figure 3
+
+```{r, lib_interpretation_setup}
+run_name <- "PPV452"
+# Read data
+sample_pwgs <- read.csv(sprintf("../Data/%s/PooledWGSSampleReport.csv", run_name), stringsAsFactors=FALSE)
+design_pwgs <- read.csv(sprintf("../Data/%s/PooledWGSDesignReport.csv", run_name), stringsAsFactors=FALSE) %>%
+  filter(DesignCategory == "edit") %>%
+  mutate(
+    OnyxEditReadCount = as.numeric(OnyxEditReadCount),
+    TotalSpanningReadCount = as.numeric(TotalSpanningReadCount),
+    FracOnyxEditReadCount = as.numeric(FracOnyxEditReadCount)
+  ) %>%
+  arrange(DesignId)
+S <- nrow(design_pwgs)
+sample_barc <- read.csv(sprintf("../Data/%s/BarcodeAmpliconSampleReport.csv", run_name), stringsAsFactors=FALSE)
+design_barc <- read.csv(sprintf("../Data/%s/BarcodeAmpliconDesignReport.csv", run_name), stringsAsFactors=FALSE) %>%
+  filter(DesignCategory == "edit") %>%
+  mutate(DesignFractionalAbundance=DesignFractionalAbundance/sum(DesignFractionalAbundance)) %>%
+  arrange(DesignId)
+
+# Part A
+hist_breaks <- sort(c(outer(1:max(design_pwgs$OnyxEditReadCount), 0.4*c(-1,1), '+')))
+depth_counts <- design_pwgs %>%
+  filter(OnyxEditReadCount > 0) %>%
+  pull(OnyxEditReadCount) %>%
+  table()
+depth_counts <- tibble(
+  Depth = as.numeric(names(depth_counts)),
+  Count = c(depth_counts)
+)
+fig_lib_interpretation_A <- design_pwgs %>%
+  filter(OnyxEditReadCount > 0) %>%
+  ggplot(aes(x=OnyxEditReadCount)) +
+    my_theme +
+    geom_histogram(breaks=hist_breaks) + 
+    labs(x="Edited Read Depth", y="Edit Count")
+
+# part B
+joined_data <- tibble(
+  DesignFreq = design_barc$DesignFractionalAbundance,
+  EditFreq = design_pwgs$FracOnyxEditReadCount
+)
+fig_lib_interpretation_B <- joined_data %>%
+  filter(EditFreq > 0) %>%
+  ggplot(aes(x=DesignFreq, y=EditFreq)) + 
+    my_theme +
+    geom_point(pch=21, bg="grey", color="black", alpha=0.8) +
+    geom_abline(slope=1, intercept=0) +
+    scale_y_log10() +
+    scale_x_log10() +
+    coord_cartesian(xlim=c(1e-4, 1e-2), ylim=c(1e-4, 1e-2)) +
+    labs(x="Reagent Frequency", y="Edit Frequency")
+
+# part C
+design_results <- repr_hist_and_qq_plot(design_barc$DesignCount, sum(design_barc$DesignCount), var_type="Design")
+fig_lib_interpretation_C <- design_results$fig_repr_hist + my_theme + labs(y="Reagent Count")
+
+# part D
+edit_fraction <- sum(design_pwgs$FracOnyxEditReadCount)
+edit_results <- repr_hist_and_qq_plot(
+  design_pwgs$OnyxEditReadCount,
+  round(edit_fraction * design_pwgs$TotalSpanningReadCount),
+  repr_range=design_results$repr_range,
+  var_type="Edit"
+)
+edit_beta_param <- get_beta_param(S, edit_results$cv_bbinom_est)
+fig_lib_interpretation_D <- edit_results$fig_repr_hist + my_theme
+
+# part E
+m_screener <- edit_fraction*S
+m <- sort(c(m_screener, seq(100, 5000, length=200), 10^seq(1, 6, length=200)))
+F <- m * edit_fraction / S
+richness_data <- tibble(
+  Cells = rep(m, 3),
+  FractionalSampling = rep(F, 3), 
+  FractionalRichness = c(
+    fractional_richness_beta(F, edit_results$cv_bbinom_est, lib_size=S)$Mean,
+    fractional_richness_beta(F, design_results$cv_bbinom_est, lib_size=S)$Mean,
+    richness_mean(p=design_barc$DesignFractionalAbundance, m=m, f=edit_fraction)/S
+  ),
+  Source=rep(c("Edits", "Reagents", "Reagents"), each=length(m)),
+  Model=rep(c("Beta", "Beta", "Empirical"), each=length(m))
+)
+p <- richness_data %>%
+  ggplot(aes(x=Cells, y=FractionalRichness, color=Model, lty=Source, group=interaction(Source, Model))) +
+    my_theme +
+    geom_line(data=richness_data %>% filter(Model=="Empirical"), lwd=2) +
+    geom_line(data=richness_data %>% filter(Model=="Beta"), lwd=1) +
+    theme(legend.title = element_blank(), legend.direction = "vertical") +
+    guides(linetype = guide_legend(override.aes = list(size = 1))) +
+    scale_colour_manual(values = c("tomato", "dodgerblue"))
+
+# Screener's curve
+fig_lib_interpretation_E <- p +
+  labs(x="Number of Clonal Isolates", y="Fractional Richness") +
+  geom_point(
+    data=richness_data %>% filter(is.element(Cells, m_screener)),
+    aes(x=Cells, y=FractionalRichness),
+    size=3
+  ) +
+  coord_cartesian(xlim=c(NA, 4000)) +
+  theme(legend.position="right")
+# Selector's curve
+fig_lib_interpretation_F <- p +
+  labs(x="Number of Cells", y="Fractional Richness") +
+  scale_x_continuous(trans="log10") +
+  geom_point(
+    data=richness_data %>% filter(is.element(Cells, 1e6)),
+    aes(x=Cells, y=FractionalRichness),
+    size=3
+  ) +
+  theme(legend.position="right")
+
+```
+
+```{r, lib_interpretation, fig.width=12, fig.height=7}
+(fig_lib_interpretation_A + fig_lib_interpretation_C + fig_lib_interpretation_E) /
+  (fig_lib_interpretation_B + fig_lib_interpretation_D + fig_lib_interpretation_F) +
+  plot_annotation(tag_levels = list(c('A','C','E','B','D','F')))
+```
+Example usage of pWGS and design reagent amplicon sequencing assays to characterize an E. coli edit
+library.  After exclusion of controls, the library consists of `r S` designs including insertions,
+deletions and substitutions spanning the genome.  The resulting edits are not expected to result
+in any notable effects on cellular fitness.
+
+**A:** Number of sequencing reads with exact match to expected edits in a pWGS run.  The pWGS run
+included `r round(sample_pwgs$TotalReadCount/1e6)`M
+2x150 read pairs.  After exclusion of reads failing quality filters the mean coverage depth fully spanning the targeted
+edits is `r round(mean(design_pwgs$TotalSpanningReadCount))`.  Summing the per-locus edit fractions produces
+an estimate of `r round(edit_fraction,2)` for the overall fraction of edited cells in the pool, thus
+the pWGS run profiles approximately
+`r round(edit_fraction*mean(design_pwgs$TotalSpanningReadCount))` genomes' worth of DNA overall.  A total
+of `r sum(design_pwgs$OnyxEditReadCount)` edited reads is seen,
+comprising `r sum(design_pwgs$OnyxEditReadCount>0)` unique edits.
+
+**B:** Scatterplot comparing the edit frequencies estimated from pWGS with design frequencies estimated from amplicon sequencing
+of reagents.
+
+**C:** Histogram and cumulative distribution function (CDF) of design representation (defined as the product of design frequency
+and library size), measured by amplicon sequencing of the design reagents.  The assay consists of
+`r sprintf("%0.1f", round(sample_barc$TotalReadCount/1e6, 1))`M reads. Fitting the design frequencies to a beta
+distribution via maximum likelihood estimation (MLE), the data are well described by a beta distribution
+with mean 1/`r S` and CV `r round(design_results$cv_bbinom_est, 2)`.
+
+**D:** Histogram and CDF as in C, but for the representation of edits as measured by pWGS.  Given that the pWGS run is
+sampling roughly
+`r round(edit_fraction*mean(design_pwgs$TotalSpanningReadCount))` genomes' worth of DNA per locus, it should be viewed
+as a sampling of mainly the right tail of the edit frequency distribution.  The fraction of the edit library that 
+is observed at least once is `r sprintf("%0.2f", round(edit_results$frac_obs, 2))`.  Fitting edit frequencies with
+a beta distribution via MLE, the estimate of CV is `r round(edit_results$cv_bbinom_est, 2)`.
+Observation of a greater fraction of all possible edits in the library
+would require substantially more sequencing.  For example, if the goal were to directly
+observe 90% of the edits in pWGS, it would require detection of edits whose frequencies among the
+`r round(100*edit_fraction)`% of edited cells is around the 10th percentile of the design frequency distribution, or
+1e`r round(log10(qbeta(0.1, edit_beta_param["a"], edit_beta_param["b"])), 1)`.  Aiming for an expected
+edit read count of 10, to have a reasonable chance of observing edits at the 10th percentile, it would take
+a mean coverage
+depth of `r round(10/qbeta(0.1, edit_beta_param["a"], edit_beta_param["b"])/edit_fraction/1e3)`K.  This
+is `r round(10/qbeta(0.1, edit_beta_param["a"], edit_beta_param["b"])/edit_fraction/mean(design_pwgs$TotalSpanningReadCount))`-fold
+larger than the actual coverage depth for the pWGS run, which would require a total
+sequencing throughput of `r round(sample_pwgs$TotalReadCount*10/qbeta(0.1, edit_beta_param["a"], edit_beta_param["b"])/edit_fraction/mean(design_pwgs$TotalSpanningReadCount)/1e9, 1)`B read pairs.
+
+**E:** Screener's curve, showing the predicted fractional richness as a function of 
+the number of clonal isolates phenotyped in a screening experiment.
+The solid and dashed red curves are based on a beta model fit to the design and edit frequencies respectively.
+The blue curve is a prediction based on the nonparametric estimate of the distribution of design frequencies,
+a nonparametric fit to the edit frequencies is not useful given the limited sampling depth of the pWGS data.
+The point indicated on the curve corresponds to the Screener's score, which is the fractional richness when
+sampling depth is equal to the library size times the edit fraction.
+
+**F:** Selector's curve, showing the same data as in E but with the x-axis changed to log scale and
+domain extended to cover the deep sampling that is typically relevant for selection applications.
+The solid point indicated on the curve corresponds to the Selector's score, which is the fractional richness
+when sampling 1M cells.
+
+```{r, lib_interpretation_extra}
+fig_lib_interpretation_A
+fig_lib_interpretation_B
+fig_lib_interpretation_C
+fig_lib_interpretation_D
+fig_lib_interpretation_E
+fig_lib_interpretation_F
+```

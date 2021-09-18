@@ -1,0 +1,84 @@
+# Supplemental Figure 4
+
+```{r, richness_prediction_setup}
+# This RData object was generated in advance by running a simulation and saving results
+# The simulation can be re-created by TODO
+load("../Data/rdata/richness_sim.RData")
+# RMSE for edit richness
+edit_richness_rmse <- tibble()
+for(i in 1:length(res)) {
+  lib_size <- res[[i]]$sim$LibSize[1]
+  truth <- res[[i]]$truth$table
+  edit_richness_rmse <- edit_richness_rmse %>%
+    bind_rows(
+      res[[i]]$sim %>%
+        filter(!is.infinite(EditCvHi) & EditFracEstimated==TRUE) %>%
+        mutate(
+          FracSample=truth$TargetCoverage*EditFracEst/lib_size,
+          BB=fractional_richness_beta(FracSample, EditCvEst, lib_size, outer=FALSE)$Mean,
+          DS=apply(cbind(EditPreseqDs, truth$TargetCoverage/TargetCoverage), 1, function(z){z[[1]](z[[2]])})/lib_size,
+          ZTNB=apply(cbind(EditPreseqZtnb, truth$TargetCoverage/TargetCoverage), 1, function(z){z[[1]](z[[2]])})/lib_size
+        ) %>%
+        filter(!is.na(DS) & !is.na(ZTNB)) %>%
+        select(TargetCoverage, BB, DS, ZTNB) %>%
+        pivot_longer(c(BB, DS, ZTNB), names_to="Method", values_to="PredEditFracRich") %>%
+        group_by(TargetCoverage, Method) %>%
+        summarize(
+          RMSE = sqrt(mean((PredEditFracRich - truth$EditFracObs)^2)),
+          RMSE_lower = sqrt(quantile((PredEditFracRich - truth$EditFracObs)^2, probs=0.25)),
+          RMSE_upper = sqrt(quantile((PredEditFracRich - truth$EditFracObs)^2, probs=0.75)),
+          .groups="drop_last"
+        ) %>%
+        ungroup() %>%
+        add_column(Run=res[[i]]$trn)
+      )
+}
+fig <- edit_richness_rmse %>%
+  mutate(Run=gsub("PPV294-", "Yeast Run", Run)) %>%
+  mutate(Run=gsub("PV38-", "E. coli Run", Run)) %>%
+  ggplot(aes(x=TargetCoverage, y=RMSE, ymin=RMSE_lower, ymax=RMSE_upper, group=interaction(Run, Method), color=Method)) +
+    geom_ribbon(aes(fill=Method), lwd=0.5, lty=2, alpha=0.05) +
+    geom_line(lwd=1.5, alpha=0.8) +
+    geom_hline(yintercept=0) +
+    geom_point(size=2.5) +
+    scale_x_log10() +
+    labs(x='Median Genomic Depth', y='RMSE of Edit Fractional Richness') +
+    my_theme +
+    scale_color_discrete() +
+    theme(legend.position="right") +
+    guides(alpha=1, size=3, fill = guide_legend(override.aes = list(linetype = 0, fill="white"))) +
+    facet_wrap(~Run, scales="free_y")
+```
+
+```{r, richness_prediction, fig.width=9, fig.height=6}
+fig
+```
+Assessment of different predictors of richness.  Two edit libraries are studied, a 10,000-design
+E. coli library and a 6,000-design yeast library.  A single whole genome shotgun library is made from
+each pool of edited cells and both sequencing libraries are sequenced together on two NextSeq 2x150
+runs.  For each organism, one sequencing run is used as a training dataset to predict the Edit Fractional
+Richness that will be observed in the other sequencing run.  To explore the performance of predictions
+as a function of sample size, the training dataset is randomly downsampled to differing levels of
+genome coverage, as measured by the median coverage depth across the targeted edit regions.  For each
+coverage depth, 1000 randomly downsampled datasets are made and each is used to train a richness predictor
+which is then used to predict edit fractional richness at the sampling depth encountered in the withheld
+test dataset.  The preformance of the predictors is summarized as the root mean squared error (RMSE) where
+error is defined as the difference between the predicted and observed fractional richness in the test data.
+The dashed lines denote span the inter-quartile range for RMSE.
+The fractional richness predictions depend on the edit fraction, which is
+estimated as the sum of the individual edit frequencies (the count of reads in which an edit is found divided
+by the total genomic depth at the edited locus).
+Three predictors of richness are evaluated.  "BB" fits a beta-binomial model using maximum likelihood estimation
+to fit a single parameter, the CV, then uses relationship (8) to predict fractional richness in the test data.
+The size of the library is assumed to be known, which is typically the case for edited cell libraries.
+"DS" is the nonparametric Daley-Smith estimator introduced in (ref) and "ZTNB" is a parametric approach used
+in the same body of work to fit a zero-truncated negative binomial model.  Neither the DS nor the ZTNB approach
+makes an assumpiton about the size of the design library, it is inferred from the training data.
+At lower sampling depths the BB
+model performs better, likely due to the fact that the edit frequencies are well described by a beta binomial
+model, hence the assumed model can be leveraged to make good predictions from limited data.  At higher
+coverage the gap between the methods mostly narrows.  An interesting exception is the E. coli run2 dataset,
+which has a heavier left tail with some designs dropping out.  The DS and ZTNB models don't assume the library size,
+which leads to less accurate prediction when sample size is small and not much information is available to estimate
+the library size, but with deep sampling these approaches are able to learn the effective library size whereas 
+the BB approach over-estimates the fractional richness.

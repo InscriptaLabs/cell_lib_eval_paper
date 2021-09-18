@@ -1,0 +1,92 @@
+# Figure 5
+
+```{r, richness_scenarios_setup}
+m <- 10^(seq(2,6,length=1000))
+f_range <- c(0.15, 0.3, 0.6)
+cv_range <- c(0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4)
+lib_size <- c(1e2, 1e3, 1e4)
+fig_data <- data.frame()
+for(S in lib_size) {
+  for(f in f_range) {
+    for(cv in cv_range) {
+      F <- m*f/S
+      fig_data <- fig_data %>%
+        bind_rows(
+          data.frame(
+            m=m,
+            EditFraction=f,
+            FracSampling=F,
+	    CV=cv,
+            Richness = S*(1-(1+F*cv^2)^(-1/cv^2)),
+            LibSize=S
+          )
+        )
+    }
+  }
+}
+fig_a <- fig_data %>%
+  filter(EditFraction==0.6 & CV==1.5 & m <= 1e4) %>%
+  mutate(LibSize = as.factor(LibSize)) %>%
+  ggplot(aes(x=m, y=Richness, group=LibSize, color=LibSize, linetype=LibSize)) +
+    my_theme +
+    scale_color_paletteer_d("ggsci::nrc_npg") +
+    theme(legend.position="none") +
+    geom_line(lwd=1) +
+    labs(x='Sample Size', y='Edit Richness', color='Library Size', linetype='Library Size')
+
+fig_b <- fig_data %>%
+  filter(EditFraction==0.6 & CV==1.5 & m <= 1e4) %>%
+  mutate(
+    FractionalRichness = Richness/LibSize,
+    LibSize = as.factor(LibSize)
+  ) %>%
+  ggplot(aes(x=m, y=FractionalRichness, group=LibSize, color=LibSize, linetype=LibSize)) +
+    my_theme +
+    scale_color_paletteer_d("ggsci::nrc_npg") +
+    theme(legend.position="right") +
+    geom_line(lwd=1) +
+    ylim(c(0,1)) +
+    labs(x='Sample Size', y='Edit Fractional Richness', color='Library Size', linetype='Library Size')
+
+fig_c <- fig_data %>%
+  filter(LibSize==1e3 & EditFraction==0.6 & m >= 1e2) %>%
+  mutate(
+    FractionalRichness = Richness/LibSize,
+    EditFraction = as.factor(EditFraction),
+    CV = as.factor(CV)
+  ) %>%
+  ggplot(aes(x=FracSampling, y=FractionalRichness, group=CV, color=CV, linetype=CV)) +
+    my_theme +
+    scale_color_viridis(discrete=TRUE, option="viridis") +
+    geom_line(lwd=1) +
+    ylim(c(0,1)) +
+    coord_cartesian(xlim=c(NA,5)) +
+    theme(legend.position="none") +
+    labs(x='Fractional Sampling', y='Edit Fractional Richness', color='Edit CV', linetype='Edit CV')
+
+fig_d <- fig_c +
+  coord_cartesian(xlim=c(NA,NA)) +
+  theme(legend.position="right") +
+  labs(y="") +
+  scale_x_continuous(trans='log10')
+```
+
+```{r, richness_scenarios, fig.width=9, fig.height=7}
+(fig_a + fig_b) / (fig_c + fig_d) + plot_annotation(tag_levels = 'A')
+```
+Exploration of richness under the assumption that edit frequencies follow a beta distribution.
+**A:** Richness for different library sizes, assuming an edit CV of 1.5 and an edit fraction of 0.6.
+**B:** Fractional richness for the same scenarios as used in **A**.
+**C:** Screener's curves, showing fractional richness as a function of fractional sampling, with
+different values for edit CV.  Fractional sampling is defined as the product of sampling depth and edit
+fraction divided by the library size, along with CV it is all that is required to predict fractional
+richness under the beta assumption.
+**D:** Selector's curves, which are the same figure as **C** with a log-scale x-axis to enable prediction
+of fractional richness with the deep sampling that is typically used for a selection experiment.
+
+```{r, richness_scenarios_extra}
+fig_a + theme(legend.position="right")
+fig_b
+fig_c + theme(legend.position="right")
+fig_d
+```

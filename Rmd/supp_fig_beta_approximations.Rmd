@@ -1,0 +1,36 @@
+# Supplemental Figure 5
+
+```{r, beta_approximations_setup}
+fig_data <- expand_grid(
+  LibSize=round(10^seq(2, 4, length=200)),
+  CV=c(1, 1.5, 2, 2.5, 3.0, 3.5)
+) %>%
+  mutate(
+    BetaA = (LibSize-1)/LibSize/CV^2 - 1/LibSize,
+    BetaB = (LibSize-1)*BetaA,
+    Error = BetaA*log(BetaB) - lgamma(BetaA+BetaB) + lgamma(BetaB)
+  )
+
+fig <- fig_data %>%
+  mutate(
+    CV = as.factor(CV)
+  ) %>%
+  ggplot(aes(x=LibSize, y=Error, group=CV, color=CV)) +
+    geom_line(lwd=1.5) +
+    labs(x = 'Library Size', y = 'Log(Actual/Approximation)') +
+    my_theme +
+    scale_color_discrete() +
+    theme(legend.position="right") +
+    scale_x_continuous(trans="log10")
+```
+
+```{r, beta_approximations, fig.width=6, fig.height=6}
+fig
+```
+Assessment of accuracy of the approximation of gamma(a+b)/gamma(b) by b^a, for a range
+of values relevant to study of edit libraries.  The log ratio of the actual over the approximation
+is plotted against library size for a range of different CV values.  The error of the 
+approximation is largest when library size is small and CV is large.  The largest log ratio
+over the range of parameters evaluated is `r max(fig_data$Error)`, meaning the approximation
+is `r sprintf("%1.2f", round(100*(exp(max(fig_data$Error))-1),2))` larger than the actual value,
+resulting in the approximation for richness being slightly lower than the exact value.

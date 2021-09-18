@@ -1,0 +1,18 @@
+name: cell_lib_eval_paper
+channels:
+  - conda-forge
+  - r
+dependencies:
+  - pandoc
+  - r-base
+  - r-extradistr
+  - r-ggbeeswarm
+  - r-ggpubr
+  - r-knitr
+  - r-mclust
+  - r-paletteer
+  - r-patchwork
+  - r-preseqr
+  - r-rmarkdown
+  - r-tidyverse
+  - r-viridis
